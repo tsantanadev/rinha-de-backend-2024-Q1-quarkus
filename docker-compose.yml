@@ -10,11 +10,12 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      - mongodb
+      mongodb:
+        condition: service_healthy
     deploy:
       resources:
         limits:
-          cpus: "0.6"
+          cpus: "0.5"
           memory: "200MB"
   api02:
     <<: *api
@@ -22,10 +23,11 @@ services:
     environment:
       - MONGO_URI=mongodb://username:password@mongodb:27017
       - MONGO_DB=rinha
+      - PORT=8081
     depends_on:
       - api01
     ports:
-      - "8081:8080"
+      - "8081:8081"
 
   nginx:
     image: nginx:latest
@@ -39,8 +41,9 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.17"
+          cpus: "0.2"
           memory: "10MB"
+
   mongodb:
     image: mongo:latest
     container_name: mongodb
@@ -53,11 +56,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.13"
+          cpus: "0.3"
           memory: "140MB"
-
-networks:
-  default:
-    driver: bridge
-    name: rinha-nginx-2024q1
-
+    healthcheck:
+      test: echo "try { rs.status() } catch (err) { rs.initiate({_id:'rs0',members:[{_id:0,host:'host.docker.internal:27017'}]}) }" | mongosh --port 27017 --quiet
+      interval: 5s
+      timeout: 30s
+      start_period: 0s
+      retries: 30
