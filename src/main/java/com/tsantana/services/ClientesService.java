@@ -1,18 +1,18 @@
 package com.tsantana.services;
 
 import com.tsantana.dtos.*;
+import com.tsantana.exceptions.UnprocessableException;
 import com.tsantana.models.Cliente;
 import com.tsantana.models.Transacao;
 import com.tsantana.repositories.ClientesRepository;
-import com.tsantana.repositories.TransacoesRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.validation.ValidationException;
-import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.NotFoundException;
 
 import java.time.LocalDateTime;
-import java.util.List;
+import java.util.Comparator;
+import java.util.LinkedList;
+import java.util.stream.Collectors;
 
 @ApplicationScoped
 public class ClientesService {
@@ -20,84 +20,82 @@ public class ClientesService {
     @Inject
     ClientesRepository clientesRepository;
 
-    @Inject
-    TransacoesRepository transacoesRepository;
-
     public PostTransacaoResponse createTransacao(
             final int id,
             final PostTransacaoRequest postTransacaoRequest) {
-        validateTipo(postTransacaoRequest.tipo());
+        validateTransacao(postTransacaoRequest);
         final var cliente = getCliente(id);
 
-        final var transacoes = transacoesRepository.findAllByClienteId(cliente.id());
-        int novoSaldo = calculateSaldo(transacoes);
+        final var valorTransacao = Integer.parseInt(postTransacaoRequest.valor());
+
+        int novoSaldo = cliente.saldo();
 
         if (postTransacaoRequest.tipo().equals("d")) {
-            novoSaldo -= postTransacaoRequest.valor();
+            novoSaldo -= valorTransacao;
 
             if (cliente.limite() + novoSaldo < 0) {
-                throw new BadRequestException();
+                throw new UnprocessableException();
             }
         } else if (postTransacaoRequest.tipo().equals("c")) {
-            novoSaldo += postTransacaoRequest.valor();
+            novoSaldo += valorTransacao;
         }
 
-        final var entity = new Transacao(
-                null,
-                cliente.id(),
-                postTransacaoRequest.valor(),
+        final var transacao = new Transacao(
+                valorTransacao,
                 postTransacaoRequest.tipo(),
                 postTransacaoRequest.descricao(),
                 LocalDateTime.now());
 
-        transacoesRepository.persist(entity);
+        final var transacoes = cliente.transacoes().stream()
+                .sorted(Comparator.comparing(Transacao::data).reversed())
+                .limit(9)
+                .collect(Collectors.toCollection(LinkedList::new));
+
+        transacoes.addFirst(transacao);
+
+        clientesRepository.update(new Cliente(cliente.id(), cliente.limite(), novoSaldo, transacoes));
 
         return new PostTransacaoResponse(cliente.limite(), novoSaldo);
     }
 
-    private void validateTipo(String tipo) {
-        if (!tipo.equals("d") && !tipo.equals("c")) {
-            throw new ValidationException("Tipo inválido");
+    private void validateTransacao(PostTransacaoRequest transacaoRequest) {
+        if (!transacaoRequest.tipo().equals("d") && !transacaoRequest.tipo().equals("c")) {
+            throw new UnprocessableException();
+        }
+
+        if (transacaoRequest.valor() == null ||
+                transacaoRequest.valor().isBlank() ||
+                    transacaoRequest.valor().contains(".") ||
+                        Integer.parseInt(transacaoRequest.valor()) <= 0) {
+            throw new UnprocessableException();
+        }
+
+        if (transacaoRequest.descricao() == null ||
+                transacaoRequest.descricao().isBlank() ||
+                transacaoRequest.descricao().length() > 10) {
+            throw new UnprocessableException();
         }
     }
 
     public ExtratoResponse getExtrato(final int id) {
         final var cliente = getCliente(id);
 
-        final var transacoes = transacoesRepository.findAllByClienteId(cliente.id());
-
-        final var saldo = calculateSaldo(transacoes);
-
         return new ExtratoResponse(
                 new SaldoResponse(
-                        saldo,
+                        cliente.saldo(),
                         LocalDateTime.now(),
                         cliente.limite()),
-                transacoes.stream()
-                        .limit(10)
-                        .map(transacao -> new TransacaoDetailResponse(
-                                transacao.valor(),
-                                transacao.tipo(),
-                                transacao.descricao(),
-                                transacao.data().toString()))
-                        .toList()
+                cliente.transacoes().stream().map(transacao -> new TransacaoDetailResponse(
+                        transacao.valor(),
+                        transacao.tipo(),
+                        transacao.descricao(),
+                        transacao.data().toString()
+                )).toList()
         );
     }
 
     private Cliente getCliente(final int id) {
         return clientesRepository.findById(id)
                 .orElseThrow(NotFoundException::new);
-    }
-
-    private int calculateSaldo(final List<Transacao> transacoes) {
-        return transacoes.stream()
-                .mapToInt(transacao -> {
-                    if (transacao.tipo().equals("d")) {
-                        return -transacao.valor();
-                    } else {
-                        return transacao.valor();
-                    }
-                })
-                .sum();
     }
 }
