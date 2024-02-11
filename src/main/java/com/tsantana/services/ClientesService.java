@@ -28,6 +28,11 @@ public class ClientesService {
 
         final var valorTransacao = Integer.parseInt(postTransacaoRequest.valor());
 
+        final var transacao = new Transacao(
+                valorTransacao,
+                postTransacaoRequest.tipo(),
+                postTransacaoRequest.descricao(),
+                LocalDateTime.now());
         int novoSaldo = cliente.saldo();
 
         if (postTransacaoRequest.tipo().equals("d")) {
@@ -39,12 +44,6 @@ public class ClientesService {
         } else if (postTransacaoRequest.tipo().equals("c")) {
             novoSaldo += valorTransacao;
         }
-
-        final var transacao = new Transacao(
-                valorTransacao,
-                postTransacaoRequest.tipo(),
-                postTransacaoRequest.descricao(),
-                LocalDateTime.now());
 
         final var transacoes = cliente.transacoes().stream()
                 .sorted(Comparator.comparing(Transacao::data).reversed())
